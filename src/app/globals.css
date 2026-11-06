@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+/* Brand colours — use them as bg-brand, text-brand, border-brand, etc. */
+@theme {
+  --color-brand: #1e4078;
+  --color-brand-light: #2d5aa8;
+  --color-soft: #eef3fb;
+  --color-ink: #1c2433;
+  --color-muted: #667085;
+  --color-line: #e3e7ef;
+  --color-ok: #13795b;
+  --color-bad: #b42318;
+  --font-sans: "Segoe UI", Roboto, system-ui, -apple-system, Arial, sans-serif;
+}
+
+html,
+body {
+  background: #f4f6fa;
+  color: var(--color-ink);
+}
+
+/* Shared input style */
+@utility field {
+  width: 100%;
+  border: 1px solid #cfd6e3;
+  border-radius: 0.5rem;
+  background: #fff;
+  padding: 0.55rem 0.65rem;
+  font-size: 15px;
+  color: var(--color-ink);
+  &:focus {
+    outline: 2px solid var(--color-brand-light);
+    border-color: var(--color-brand-light);
+  }
+}
+
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 10mm;
+  }
+  html,
+  body {
+    background: #fff;
+  }
+}
