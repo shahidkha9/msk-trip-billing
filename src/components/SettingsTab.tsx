@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import type { RateCard } from "@/lib/types";
-import { isBase, up } from "@/lib/utils";
+import { getSupabase } from "@/lib/supabase";
+import { fmtDateTime, isBase, up } from "@/lib/utils";
+import { PRICE_TEXT, SUPPORT_PHONE } from "@/lib/brand";
 import { Button, Card, Field, grid } from "./ui";
 import type { AppApi } from "./types";
 
@@ -11,7 +13,7 @@ export function SettingsTab({ api }: { api: AppApi }) {
   const [info, setInfo] = useState({
     businessName: settings.businessName,
     phone: settings.phone,
-    billTo: settings.billTo,
+    address: settings.address,
     loadCharge: String(settings.loadCharge),
     detentionCharge: String(settings.detentionCharge),
   });
@@ -34,9 +36,9 @@ export function SettingsTab({ api }: { api: AppApi }) {
   const saveInfo = async () => {
     const ok = await api.updateSettings({
       ...settings,
-      businessName: info.businessName.trim() || "MSK Transport Service",
+      businessName: info.businessName.trim() || settings.businessName,
       phone: info.phone.trim(),
-      billTo: info.billTo.trim(),
+      address: info.address.trim(),
       loadCharge: Number(info.loadCharge) || 0,
       detentionCharge: Number(info.detentionCharge) || 0,
     });
@@ -81,14 +83,66 @@ export function SettingsTab({ api }: { api: AppApi }) {
     if (!confirm(`Delete location "${loc}"?`)) return;
     const locations = { ...settings.locations };
     delete locations[loc];
-    await api.updateSettings({ ...settings, locations });
+    await api.updateSettings({ ...settings, locations, baseLocations: settings.baseLocations.filter((b) => b !== loc) });
   };
+  const toggleBase = async (loc: string, on: boolean) => {
+    const baseLocations = on ? [...new Set([...settings.baseLocations, loc])] : settings.baseLocations.filter((b) => b !== loc);
+    if (await api.updateSettings({ ...settings, baseLocations })) api.toast(on ? `${loc} is now your own place ✔` : "Saved ✔");
+  };
+
+  /* ---------- vehicle types ---------- */
+  const [newType, setNewType] = useState("");
+  const addType = async () => {
+    const t = newType.trim();
+    if (!t) return;
+    if (settings.vehicles.some((v) => v.toLowerCase() === t.toLowerCase())) { alert("This type already exists"); return; }
+    const routes = Object.fromEntries(Object.entries(settings.routes).map(([r, row]) => [r, { ...row, [t]: 0 }]));
+    if (await api.updateSettings({ ...settings, vehicles: [...settings.vehicles, t], routes })) {
+      setRates(routes);
+      setNewType("");
+      api.toast("Vehicle type added — enter its rates in the Rate Card");
+    }
+  };
+  const removeType = async (t: string) => {
+    if (settings.vehicles.length <= 1) { alert("You need at least one vehicle type."); return; }
+    if (!confirm(`Remove vehicle type "${t}"? (Old trips keep their type.)`)) return;
+    await api.updateSettings({ ...settings, vehicles: settings.vehicles.filter((v) => v !== t) });
+  };
+
+  /* ---------- account ---------- */
+  const changePassword = async () => {
+    const p1 = prompt("New password (at least 6 characters):");
+    if (!p1) return;
+    if (p1.length < 6) { alert("Password must be at least 6 characters."); return; }
+    if (prompt("Type the new password again:") !== p1) { alert("The two passwords do not match."); return; }
+    const { error } = await getSupabase().auth.updateUser({ password: p1 });
+    if (error) alert("Could not change password: " + error.message);
+    else api.toast("Password changed ✔");
+  };
+  const a = api.access;
+  const planText =
+    a.kind === "admin" ? "Admin account" :
+    a.kind === "trial" ? `Free trial — ${a.daysLeft} days left (until ${fmtDateTime(a.until)})` :
+    a.kind === "paid" ? `Active — paid until ${fmtDateTime(a.until)}` :
+    a.kind === "suspended" ? "Suspended" :
+    a.kind === "expired" ? `Expired on ${fmtDateTime(a.until)}` : "—";
 
   const routeNames = Object.keys(settings.routes);
 
   return (
     <>
-      <Card title="Bill Details & Charges">
+      <Card title="Your Account">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="text-sm">
+            <div><span className="text-muted">Login:</span> <b>{api.profile?.email || "—"}</b></div>
+            <div><span className="text-muted">Plan:</span> <b>{planText}</b></div>
+            {a.kind !== "admin" && <div className="text-[12px] text-muted">Price {PRICE_TEXT}. To pay or for help: {SUPPORT_PHONE}</div>}
+          </div>
+          <Button variant="secondary" onClick={changePassword}>🔑 Change Password</Button>
+        </div>
+      </Card>
+
+      <Card title="Business Details & Charges">
         <div className={grid}>
           <Field label="Business Name (shown on bill)">
             <input className="field" value={info.businessName} onChange={(e) => setInfo({ ...info, businessName: e.target.value })} />
@@ -96,8 +150,8 @@ export function SettingsTab({ api }: { api: AppApi }) {
           <Field label="Phone">
             <input className="field" value={info.phone} onChange={(e) => setInfo({ ...info, phone: e.target.value })} />
           </Field>
-          <Field label="Bill To (Company)">
-            <input className="field" value={info.billTo} onChange={(e) => setInfo({ ...info, billTo: e.target.value })} />
+          <Field label="Address (shown on bill)">
+            <input className="field" value={info.address} onChange={(e) => setInfo({ ...info, address: e.target.value })} />
           </Field>
           <Field label="Loading/Unloading Charge (Rs per trip)">
             <input type="number" min={0} className="field" value={info.loadCharge} onChange={(e) => setInfo({ ...info, loadCharge: e.target.value })} />
@@ -111,12 +165,28 @@ export function SettingsTab({ api }: { api: AppApi }) {
         </div>
       </Card>
 
-      <Card title="Rate Card (fuel included, round trip)">
+      <Card title="Vehicle Types">
+        <div className="mb-3 flex flex-wrap gap-2">
+          {settings.vehicles.map((t) => (
+            <span key={t} className="flex items-center gap-1.5 rounded-lg bg-soft px-2.5 py-1.5 text-sm">
+              {t}
+              <button className="cursor-pointer text-bad" title="Remove" onClick={() => removeType(t)}>✕</button>
+            </span>
+          ))}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <input className="field max-w-72" placeholder="New type (e.g. 22 ft Truck)" value={newType} onChange={(e) => setNewType(e.target.value)} />
+          <Button variant="secondary" onClick={addType}>+ Add Type</Button>
+        </div>
+      </Card>
+
+      <Card title="Rate Card (fixed fare per area)">
         <div className="overflow-x-auto rounded-xl border border-line">
           <table className="w-full border-collapse text-[13.5px]">
             <thead>
               <tr>
                 <th className="border-b border-line bg-[#f7f9fc] px-2.5 py-2 text-left">Route</th>
+                <th className="border-b border-line bg-[#f7f9fc] px-2.5 py-2 text-left" title="Your own godown / mill">My place</th>
                 {settings.vehicles.map((v) => (
                   <th key={v} className="whitespace-nowrap border-b border-line bg-[#f7f9fc] px-2.5 py-2 text-right">{v}</th>
                 ))}
@@ -156,8 +226,8 @@ export function SettingsTab({ api }: { api: AppApi }) {
 
       <Card title="Locations & Routes">
         <p className="mb-3 text-[13px] text-muted">
-          Set the area (route) for each mill or godown. Once set, typing the location in an entry fills in the route and
-          fare automatically. YTM-01 / YTM-07 are your base, so the route is taken from the other party.
+          Set the area (route) for each place. Once set, typing the place in a trip fills in the route and fare automatically.
+          Tick <b>My place</b> for your own godowns / mills — then the fare is taken from the OTHER place of the trip.
         </p>
         <div className="mb-3 flex flex-wrap gap-2">
           <input className="field max-w-72" placeholder="New location name" value={newLoc} onChange={(e) => setNewLoc(e.target.value)} />
@@ -176,13 +246,17 @@ export function SettingsTab({ api }: { api: AppApi }) {
               {Object.keys(settings.locations).sort().map((l) => (
                 <tr key={l}>
                   <td className="border-b border-line px-2.5 py-2">
-                    {l} {isBase(l) && <span className="ml-1 rounded-md bg-soft px-1.5 py-0.5 text-xs">Base</span>}
+                    {l}
                   </td>
                   <td className="border-b border-line px-2 py-1.5">
                     <select className="field max-w-52" value={settings.locations[l]} onChange={(e) => setLocationRoute(l, e.target.value)}>
                       <option value="">-- Not set --</option>
                       {routeNames.map((r) => <option key={r}>{r}</option>)}
                     </select>
+                  </td>
+                  <td className="border-b border-line px-2.5 py-1.5">
+                    <input type="checkbox" className="size-5 accent-brand" checked={isBase(l, settings.baseLocations)}
+                      onChange={(e) => toggleBase(l, e.target.checked)} />
                   </td>
                   <td className="border-b border-line px-2">
                     <Button small variant="danger" onClick={() => deleteLocation(l)}>Del</Button>

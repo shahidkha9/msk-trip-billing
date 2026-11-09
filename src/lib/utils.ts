@@ -62,14 +62,23 @@ export function formatVehicleNo(v: string, final = false): string {
   return digits ? `${letters}-${digits}` : letters;
 }
 
-/** YTM-01 / YTM-07 are the base; the route comes from the other party. */
-export const isBase = (name: string) => /^YTM/i.test(String(name).trim());
-export function otherParty(from: string, to: string): string {
+/** Your own godown / mill (set in Settings → Locations). The fare route comes from the other side. */
+export const isBase = (name: string, bases: string[]) => bases.includes(up(name));
+export function otherParty(from: string, to: string, bases: string[]): string {
   const f = up(from), t = up(to);
-  if (t && !isBase(t)) return t;
-  if (f && !isBase(f)) return f;
+  if (t && !isBase(t, bases)) return t;
+  if (f && !isBase(f, bases)) return f;
   return t || f;
 }
+
+/** Builds a CSV file (opens in Excel; Urdu/special characters safe). */
+export function csvBlob(rows: unknown[][]): Blob {
+  const q = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  return new Blob(["\ufeff" + rows.map((r) => r.map(q).join(",")).join("\r\n")], { type: "text/csv" });
+}
+
+export const sumBy = <T,>(list: T[], f: (x: T) => number) => list.reduce((s, x) => s + (f(x) || 0), 0);
+export const uniqueSorted = (list: string[]) => [...new Set(list.map((x) => x.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
 
 export function downloadBlob(blob: Blob, name: string) {
   const a = document.createElement("a");
@@ -91,10 +100,10 @@ export function billNo() {
   return `B-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
 }
 
-/* ---------- outside (hired) vehicles ---------- */
-/** What you owe the outside vehicle for this trip (0 for your own vehicle). */
+/* ---------- vehicle owner payments ---------- */
+/** What you owe the vehicle owner for this trip (0 for your own company vehicle). */
 export const hiredCostOf = (t: Trip) => (t.hired ? Number(t.hiredCost) || 0 : 0);
-/** Your margin on this trip: what the customer pays minus what you pay the outside vehicle. */
+/** Your margin on this trip: what the customer pays minus what you pay the vehicle owner. */
 export const tripMargin = (t: Trip) => tripTotal(t) - hiredCostOf(t);
 
 /* ---------- date ranges ---------- */
@@ -108,3 +117,12 @@ export function rangeFor(r: RangePreset): [string, string] {
   return ["", ""];
 }
 export const inRange = (date: string, from: string, to: string) => (!from || date >= from) && (!to || date <= to);
+
+/** Adds months to a date (used for subscriptions). */
+export function addMonths(d: Date, months: number): Date {
+  const x = new Date(d);
+  x.setMonth(x.getMonth() + months);
+  return x;
+}
+export const daysBetween = (a: Date, b: Date) => Math.ceil((b.getTime() - a.getTime()) / 864e5);
+export const fmtDateTime = (iso: string | null | undefined) => (iso ? fmtDate(isoLocal(new Date(iso))) : "—");

@@ -1,160 +1,138 @@
-# MSK Trip Billing — Setup Guide (Next.js version)
+# Transport Ledger — Setup & Upgrade Guide
 
-Ye guide aapko step-by-step batati hai ke software **Vercel** par kaise lagana hai, taake laptop aur mobile dono par **ek hi data** chale.
-
-**Pehli baar kul waqt: 30–45 minute. Sab kuch free hai.**
+Ye software ab ek **bechne wala product** hai: har transporter apna account khud bana sakta hai, 30 din free trial chalata hai, aur aap **Admin** panel se payment milne par account chalu karte hain.
 
 | Cheez | Kaam |
 |---|---|
-| **Supabase** | Online database. Aapka sara data yahan save hota hai. |
-| **GitHub** | Aapke software ki files yahan rehti hain. |
-| **Vercel** | GitHub se files le kar website chalata hai (aapka link). |
-
-> **Pehle wala online version (HTML) bana chuke hain?** Agar aap pichhli guide se Supabase setup kar chuke hain to **Step 1 skip karein**. Same database chalega, aur aapka purana data khud nayi version mein aa jayega. Software khud **Mazda 20 ft** ke rates aur **Detention Rs 2,500** add kar dega.
+| **Supabase** | Database + login. Har account ka data alag aur mehfooz. |
+| **GitHub** | Code yahan rehta hai. |
+| **Vercel** | Website chalata hai (aapka link). |
 
 ---
 
-## Step 1 — Supabase (database) banayein
+## A. Aap pehle se chala rahe hain (MSK) → UPGRADE — 5 qadam
 
-1. **supabase.com** → **Start your project** → GitHub ya email se sign up karein.
-2. **New project**:
-   - Name: `msk-trip-billing`
-   - Database password: mazboot password (likh kar rakh lein)
-   - Region: **Singapore** ya **Mumbai**
-3. 1–2 minute intezar karein.
-4. Left menu → **SQL Editor** → **New query**. Project folder mein `supabase-setup.sql` Notepad mein kholein, **sara** text copy karein, paste karein → **Run**. "Success" aana chahiye.
-5. **Apna login banayein:** **Authentication** → **Users** → **Add user** → **Create new user** → email + password daalein → **"Auto Confirm User"** par tick → Create.
-6. **Kisi aur ko account banane se rokein:** **Authentication** → **Sign In / Providers** → **"Allow new users to sign up"** ko **OFF** karein → Save.
-7. **Do cheezein copy karke Notepad mein rakh lein** — **Project Settings** (⚙️) mein:
-   - **Project URL** — jaise `https://abcdxyz.supabase.co` (Data API / General section mein)
-   - **Publishable key** — `sb_publishable_...` se shuru hoti hai (API Keys section). Purane projects mein iska naam **anon public** hota hai (`eyJ...`).
+Aapka sara purana data (trips, expenses) mehfooz rahega aur khud naye system mein aa jayega:
+- "Yunus Textile Mills Limited" khud ek **Customer** ban jayega, aur purani saari trips us ke naam ho jayengi.
+- YTM-01 / YTM-07 aapki "My place" (base) locations rahengi.
 
-   ⚠️ **"secret" ya "service_role" key kabhi copy na karein.**
+**1. Database update (Supabase)**
+Supabase → **SQL Editor** → **New query** → `supabase-setup.sql` ka **sara** text paste → **Run** → "Success" aana chahiye.
+(Ye file dobara chalana bhi safe hai.)
+
+**2. Khud ko Admin banayein**
+`make-me-admin.sql` kholein → `YOUR-EMAIL@example.com` ki jagah **apna login email** likhein → SQL Editor mein paste → **Run**.
+"Success. 1 row" aana chahiye. Agar "0 rows" aaye to email ghalat hai (Authentication → Users mein check karein).
+
+**3. Sign-up chalu karein** ⚠️ (pehle hum ne band kiya tha)
+Supabase → **Authentication → Sign In / Providers** →
+- **Allow new users to sign up** → **ON**
+- **Email** provider → **Confirm email** → shuru mein **OFF** rakhein (neeche "Emails" section dekhein) → **Save**
+
+**4. Password-reset link ka address**
+Supabase → **Authentication → URL Configuration** →
+- **Site URL**: apna Vercel link, jaise `https://msk-trip-billing.vercel.app`
+- **Redirect URLs** → **Add URL** → wohi link, aur `http://localhost:3000` bhi → **Save**
+
+**5. Code update + upload**
+Apne project folder mein **purana `src` folder pehle DELETE karein** (sirf copy-replace na karein — purani `ProfitTab.tsx` file reh gayi to Vercel build fail ho jayega). Phir zip ka naya **`src`** folder paste karein. Saath mein `supabase-setup.sql`, `make-me-admin.sql`, `SETUP-GUIDE.md`, `README.md` aur `public/icon.svg` bhi copy karein, aur purani `expenses-setup.sql` delete kar dein.
+⚠️ `.env.local`, `node_modules`, `.git` ko **mat chhuein**.
+```
+npm run dev
+```
+Test karein (http://localhost:3000), phir:
+```
+git add .
+git commit -m "SaaS: sign-up, customers, fleet, reports, admin"
+git push
+```
+
+> **Pehle `src/lib/brand.ts` zaroor badlein** (neeche section C).
 
 ---
 
-## Step 2 — GitHub par files upload karein
+## B. Bilkul naya setup (naye Supabase project ke saath)
 
-1. **github.com** par account banayein (agar nahi hai).
-2. Upar **+** → **New repository**
-   - Name: `msk-trip-billing`
-   - **Private** chunein
-   - Baaqi sab waise hi chhor dein → **Create repository**
-3. Nayi page par **"uploading an existing file"** link dabayein.
-4. Zip file **extract** karein. `msk-trip-billing` folder **ke andar** jayein, aur andar ki **sari files aur folders** (`src`, `public`, `package.json` waghaira) select karke GitHub page par drag karein.
-   - ⚠️ Folder khud drag na karein — uske **andar** ki cheezein drag karein. GitHub par `package.json` sab se upar wali list mein nazar aana chahiye, kisi folder ke andar nahi.
-5. Neeche **Commit changes** dabayein.
+1. **supabase.com** → New project (Region: Singapore / Mumbai).
+2. **SQL Editor** → `supabase-setup.sql` paste → **Run**.
+3. Apni **website par Sign up** karein (apne business ke naam se).
+4. `make-me-admin.sql` mein apna email likh kar **Run** karein → aap Admin ban gaye.
+5. Section A ke qadam **3 aur 4** (sign-up ON, URL Configuration).
+6. **Vercel** → Project → Settings → **Environment Variables**:
+   - `NEXT_PUBLIC_SUPABASE_URL` = Project URL
+   - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` = Publishable key (`sb_publishable_...`) — **kabhi bhi secret/service_role key nahi**
+   - Phir **Deployments → Redeploy**
 
 ---
 
-## Step 3 — Vercel par deploy karein
+## C. Apne product ki details — `src/lib/brand.ts`
 
-1. **vercel.com** → **Sign Up** → **Continue with GitHub**.
-2. **Add New… → Project** → `msk-trip-billing` ke saamne **Import**.
-3. **Framework Preset** khud **Next.js** aa jayega. Kuch na badlein.
-4. **Environment Variables** section kholein aur **do** variables add karein:
+Ye ek hi file hai jahan aapke product ka naam aur contact likha hai. Login page, sign-up page aur "trial khatam" message par yahi nazar aata hai:
 
-| Key (Name) | Value |
+```ts
+export const PRODUCT_NAME = "Transport Ledger";   // apne product ka naam
+export const SUPPORT_PHONE = "03XX-XXXXXXX";       // ⚠️ apna WhatsApp number zaroor daalein
+export const PRICE_TEXT = "Rs 1,000 per month";     // apni qeemat
+export const PAYMENT_METHODS = "JazzCash / Easypaisa / Bank transfer";
+```
+
+---
+
+## D. Customer ko bechne ka tareeqa (roz ka kaam)
+
+1. Transporter ko apna link dein → woh **"Create a free account"** se khud sign-up karta hai.
+2. 3-qadam **Setup Wizard**: business naam → gaariyon ki types + charges → pehla customer + rates.
+3. **30 din free.** Upar banner mein din ginte rehte hain aur aapka number/qeemat dikhti hai.
+4. Woh aapko JazzCash/Easypaisa par paisa bhejta hai → aap **👑 Admin** tab → uski line mein **+1 month** (ya +3 / +12) dabate hain. Bas.
+5. Paisa na aaye to trial/subscription khatam hote hi account **read-only** ho jata hai: data dekh aur download kar sakta hai, nayi entry nahi. (Ye rule **database** mein laga hai, sirf screen par nahi.)
+6. **Note** button se likh lein: "5 Nov — Rs 1000 JazzCash".
+
+---
+
+## E. Software mein kya hai
+
+| Tab | Kaam |
 |---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | Aapka Project URL (Step 1.7) |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Aapki Publishable key (Step 1.7) |
-
-   Naam bilkul aise hi likhein — capital letters aur underscore ( _ ) ke saath. Value ke aage/peechhe space na ho.
-
-5. **Deploy** dabayein. 1–2 minute baad link milega, jaise `https://msk-trip-billing.vercel.app`.
-
-> **"Setup needed" screen aaye?** Iska matlab variables theek se add nahi hue. Vercel → Project → **Settings → Environment Variables** mein check karein → phir **Deployments** → sab se upar wali deployment ke **⋯** → **Redeploy**. (Variables badalne ke baad hamesha Redeploy karna zaroori hai.)
-
----
-
-## Step 4 — Laptop aur mobile par chalayein
-
-- **Laptop:** link Chrome mein kholein → login → bookmark kar lein.
-- **Android:** Chrome mein link → login → menu (⋮) → **Add to Home screen**. App ki tarah icon ban jayega.
-- **iPhone:** Safari mein link → Share → **Add to Home Screen**.
-
-Har device par sirf ek dafa login karna hai.
-
-**Bilkul pehli offline file (Trip_Billing.html) ka data laana ho:** purani file kholein → Backup → **Download Backup**. Phir naye software mein → Backup → **Restore Backup** → wo file chunein.
+| ➕ **New Trip** | Customer chunein, gaari number likhein → fleet se type, driver aur owner khud bhar jata hai. Owner ka hissa (%) bhi khud. |
+| 📋 **Trips & Bills** | Customer-wise filter, PDF bill (customer ka naam + address), Print, Excel. Bill par owner/aapka margin **nahi** dikhta. |
+| 🏢 **Customers** | Har company: kitna bill, kitna mila, **kitna baqi**. Payment receive karein (cash/cheque), statement Excel. |
+| 🚚 **Fleet & Drivers** | Har gaari: owner (aap / abbu / bhai / bahar wala + %), driver, phone, salary. **Pay salary** button → expense mein chala jata hai. |
+| 💸 **Expenses** | Har kharcha; gaari ke hisaab se filter. |
+| 🤝 **Owner Payments** | Kis owner ka kitna baqi, **Mark Paid** / **Mark all paid**. |
+| 📊 **Reports** | ① **Trip Profit** (income − owners) ② **Expenses** ③ **Net Profit** — aur **har gaari** aur **har driver** ka alag hisaab. |
+| ⚙️ **Settings** | Account/plan, password badlein, business details, charges, vehicle types, rate card, locations ("My place"), expense types. |
+| 💾 **Backup** | Sara data ek file mein download/restore. |
+| 👑 **Admin** | Sirf aap: saare accounts, trial/paid status, +1/+3/+12 months, suspend, note. |
 
 ---
 
-## Update: Expenses, Outside Vehicles aur Profit (Nov 2026)
+## F. Zaroori baatein jo bechne se pehle jaan lein
 
-**Naye features:**
-- **Outside (hired) vehicle:** trip entry mein "Outside (hired) vehicle" chunein, owner ka naam aur use dene wali raqam likhein, aur "Already paid them" tick karein agar de chuke hain. Customer ke bill par ye **nazar nahi aata**.
-- **💸 Expenses tab:** driver salary, repair, tyres, toll waghaira. Apni types "Rates & Locations" mein add kar sakte hain.
-- **📊 Profit & Payments tab:** Income − Outside vehicle cost − Expenses = **Net Profit**. Neeche list hai ke kis outside gaari ko kitna dena baqi hai, aur **Mark Paid** ka button bhi.
-
-**Purane setup par update kaise karein (ek dafa):**
-1. **Supabase → SQL Editor → New query** → `expenses-setup.sql` ka sara text paste karein → **Run**. (Isse sirf naya table banta hai; trips ko kuch nahi hota.)
-2. Naye zip ka **`src` folder** apne project folder mein copy karein aur purane `src` ko **replace** karein. Saath mein `expenses-setup.sql`, `supabase-setup.sql` aur `SETUP-GUIDE.md` bhi copy kar lein. ⚠️ `.env.local`, `node_modules` aur `.git` ko na chhuein.
-3. Test: `npm run dev` → http://localhost:3000.
-4. Upload:
-   ```
-   git add .
-   git commit -m "Add expenses, outside vehicles and profit"
-   git push
-   ```
-   Vercel 1–2 minute mein khud nayi version live kar dega.
-
-## Is version mein kya naya hai
-
-- **Mazda 20 ft** — rate 17 ft se Rs 2,000 zyada: Landhi **8,000**, Korangi **9,500**, SITE **17,000**.
-- **Detention** — har trip par checkbox, **+ Rs 2,500**. Rate "Rates & Locations" tab se badal sakte hain.
-- PDF bill, Records aur Excel (CSV) mein **Detention** ka alag column aur total.
-- Poora software English mein.
-- Code Next.js + TypeScript + Tailwind CSS mein — professional aur aage badhane mein aasaan.
+- **Emails:** Supabase ka muft email system bohat kam emails bhejta hai (ghante mein sirf chand). Isliye shuru mein "Confirm email" **OFF** rakhein. Jab customers barhein to free **Resend** (resend.com) jaisa SMTP jor dein: Supabase → Authentication → **Emails → SMTP Settings**. Tab "Confirm email" ON kar sakte hain aur password-reset emails bharosemand ho jayengi.
+- **Supabase free plan:** 500 MB database (hazaron trips ke liye kaafi). Agar poore project mein **7 din koi activity na ho** to pause ho jata hai. Jab paying customers aa jayein, **Pro plan ($25/month)** lein: pause nahi hota aur roz ka automatic backup milta hai. Ye aapki zimmedari hai kyunki doosron ka data aapke paas hai.
+- **Password bhool jaye:** customer khud "Forgot password?" se reset kar sakta hai (email zaroori). Aap Supabase → Authentication → Users se bhi user ka password badal sakte hain.
+- **Privacy:** customers ko seedha batayein ke unka data sirf unhe nazar aata hai, aap kisi ko nahi dete, aur woh kabhi bhi Backup se download kar sakte hain.
 
 ---
 
-## Roz ka istemal — zaroori baatein
-
-- **Entry save karne ke liye internet zaroori hai.** Internet na ho to software purana data dikhata hai lekin nayi entry save nahi hoti, aur saaf message deta hai.
-- Doosre device par **⟳ Sync** dabayein (ya app dobara kholein — khud sync ho jata hai).
-- **Mahine mein ek baar** Backup tab se **Download Backup** karke file Google Drive/WhatsApp par rakh lein.
-- **Supabase free plan:** agar project 7 din tak bilkul istemal na ho to "pause" ho jata hai. Roz use karenge to masla nahi. Pause ho jaye to supabase.com par login karke **Restore project** dabayein — data mehfooz rehta hai.
-
----
-
-## Baad mein code mein tabdeeli
-
-GitHub par file kholein → ✏️ (pencil) → tabdeeli → **Commit changes**. Vercel 1–2 minute mein khud nayi version live kar deta hai.
-
-Kaunsi file kya karti hai:
-
-| File | Kaam |
-|---|---|
-| `src/lib/defaults.ts` | Default rates, gaariyan, locations, charges |
-| `src/components/EntryTab.tsx` | Nayi entry ka form |
-| `src/components/RecordsTab.tsx` | Records, filter, PDF/Print/CSV |
-| `src/components/SettingsTab.tsx` | Rates & Locations screen |
-| `src/components/BackupTab.tsx` | Backup / Restore |
-| `src/components/TripBillingApp.tsx` | Login, tabs, database se save/load |
-| `src/lib/pdf.ts` | PDF bill ka design |
-| `src/lib/utils.ts` | Hisaab (totals), gaari number format |
-
----
-
-## Masle aur hal
+## G. Masle aur hal
 
 | Masla | Hal |
 |---|---|
-| Vercel par build fail | Check karein `package.json` GitHub repository ke **sab se upar** hai, kisi folder ke andar nahi (Step 2.4). |
-| "Setup needed" screen | Environment Variables check karein, phir **Redeploy** (Step 3). |
-| "Wrong email or password" | Supabase → Authentication → Users mein user bana hai aur confirmed hai? |
-| "Could not save … check internet" | Internet check karein; Supabase project paused to nahi? |
-| Login ke baad "No connection" | `supabase-setup.sql` chalana reh gaya (Step 1.4). Dobara Run karein. |
+| "Database update needed" screen | `supabase-setup.sql` chalana reh gaya → Section A, qadam 1. |
+| Admin tab nazar nahi aata | `make-me-admin.sql` mein email theek likh kar chalayein, phir ⟳ Sync / log out-in. |
+| Naya user sign-up nahi kar pa raha | "Allow new users to sign up" ON? (A-3) |
+| Sign-up ke baad "check your email" aur email nahi aayi | "Confirm email" OFF karein (A-3) ya SMTP lagayein (F). |
+| Reset link localhost ya ghalat jagah khulta hai | URL Configuration (A-4). |
+| "Your account cannot save right now" | Trial/subscription khatam → Admin se +1 month. |
+| "Setup needed" screen | Vercel Environment Variables + Redeploy (B-6). |
+| Build error: `ProfitTab` / `saveTrip` / `expensesReady` | Purana `src` folder delete kiye baghair naya copy kiya. `src/components/ProfitTab.tsx` delete karein (A-5). |
 
 ---
 
-## Apne computer par chalana (optional — seekhne ke liye)
-
-1. **nodejs.org** se Node.js (LTS) install karein.
-2. Project folder mein `.env.example` ki copy banayein, naam `.env.local` rakhein, aur apni URL/key daalein.
-3. Folder mein terminal kholein:
-   ```
-   npm install
-   npm run dev
-   ```
-4. Browser mein **http://localhost:3000** kholein.
+## H. Apne computer par chalana
+```
+npm install
+npm run dev
+```
+`.env.local` mein do lines (URL aur Publishable key) honi chahiyein. Browser: **http://localhost:3000**

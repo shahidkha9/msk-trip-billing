@@ -8,11 +8,14 @@ interface Props {
   onDelete?: (id: string) => void;
   showTotal?: boolean;
   print?: boolean;
+  /** show a Customer column (screen only) */
+  customerName?: (id: string) => string;
 }
 
 /** The table of trips used on the entry page, records page and printed bill. */
-export function TripTable({ trips, onEdit, onDelete, showTotal = false, print = false }: Props) {
-  if (!trips.length) return <p className="p-4 text-[13px] text-muted">No entries found.</p>;
+export function TripTable({ trips, onEdit, onDelete, showTotal = false, print = false, customerName }: Props) {
+  if (!trips.length) return <p className="p-4 text-[13px] text-muted">No trips found.</p>;
+  const showCustomer = !!customerName && !print;
   const actions = !!(onEdit || onDelete);
   const s = sums(trips);
   const td = print ? "border border-gray-400 px-1.5 py-1" : "border-b border-line px-2.5 py-2";
@@ -25,6 +28,7 @@ export function TripTable({ trips, onEdit, onDelete, showTotal = false, print = 
         <tr>
           <th className={th}>#</th>
           <th className={th}>Date</th>
+          {showCustomer && <th className={th}>Customer</th>}
           <th className={th}>Slip</th>
           <th className={th}>Vehicle</th>
           <th className={th}>Type</th>
@@ -44,12 +48,13 @@ export function TripTable({ trips, onEdit, onDelete, showTotal = false, print = 
           <tr key={t.id} className="hover:bg-[#fafcff]">
             <td className={td}>{i + 1}</td>
             <td className={td}>{fmtDate(t.date)}</td>
+            {showCustomer && <td className={`${td} max-w-40 overflow-hidden text-ellipsis`}>{customerName!(t.customerId)}</td>}
             <td className={td}>{t.slipNo}</td>
             <td className={td}>
               {t.vehicleNo}
               {t.hired && !print && (
-                <span className="ml-1.5 rounded-md bg-[#fff7e6] px-1.5 py-0.5 text-[11px] text-[#7a4b00]" title={`Outside vehicle: ${t.hiredParty}`}>
-                  Hired
+                <span className="ml-1.5 rounded-md bg-[#fff7e6] px-1.5 py-0.5 text-[11px] text-[#7a4b00]" title={`Owner: ${t.hiredParty}`}>
+                  {t.hiredParty || "Owner"}
                 </span>
               )}
             </td>
@@ -88,7 +93,7 @@ export function TripTable({ trips, onEdit, onDelete, showTotal = false, print = 
       {showTotal && (
         <tfoot>
           <tr className="font-bold">
-            <td className={`${td} ${n}`} colSpan={8}>
+            <td className={`${td} ${n}`} colSpan={showCustomer ? 9 : 8}>
               Total
             </td>
             <td className={`${td} ${n}`}>{num(s.rent)}</td>

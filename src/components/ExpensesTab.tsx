@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { Expense } from "@/lib/types";
-import { downloadBlob, fmtDate, formatVehicleNo, inRange, newId, num, rangeFor, rs, today, type RangePreset } from "@/lib/utils";
+import { csvBlob, downloadBlob, fmtDate, formatVehicleNo, inRange, newId, num, rangeFor, rs, today, uniqueSorted, up, type RangePreset } from "@/lib/utils";
 import { Button, Card, Field, Stat, grid } from "./ui";
 import type { AppApi } from "./types";
 
@@ -24,15 +24,16 @@ export function ExpensesTab({ api }: { api: AppApi }) {
   const [saving, setSaving] = useState(false);
   const [[from, to], setRange] = useState<[string, string]>(() => rangeFor("thismonth"));
   const [catFilter, setCatFilter] = useState("");
+  const [vehFilter, setVehFilter] = useState("");
 
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm((f) => ({ ...f, [k]: v }));
 
   const list = useMemo(
     () =>
       expenses
-        .filter((x) => inRange(x.date, from, to) && (!catFilter || x.category === catFilter))
+        .filter((x) => inRange(x.date, from, to) && (!catFilter || x.category === catFilter) && (!vehFilter || x.vehicleNo.includes(up(vehFilter))))
         .sort((a, b) => (a.date === b.date ? (a.created || 0) - (b.created || 0) : a.date < b.date ? -1 : 1)),
-    [expenses, from, to, catFilter],
+    [expenses, from, to, catFilter, vehFilter],
   );
   const total = list.reduce((s, x) => s + x.amount, 0);
   const byCategory = useMemo(() => {
@@ -40,20 +41,15 @@ export function ExpensesTab({ api }: { api: AppApi }) {
     for (const x of list) m[x.category] = (m[x.category] || 0) + x.amount;
     return Object.entries(m).sort((a, b) => b[1] - a[1]);
   }, [list]);
-  const paidToList = useMemo(() => [...new Set(expenses.map((x) => x.paidTo).filter(Boolean))].sort(), [expenses]);
+  const paidToList = useMemo(
+    () => uniqueSorted([...api.vehicles.map((v) => v.driverName), ...expenses.map((x) => x.paidTo)]),
+    [api.vehicles, expenses],
+  );
+  const vehicleList = useMemo(
+    () => uniqueSorted([...api.vehicles.map((v) => v.vehicleNo), ...api.trips.map((t) => t.vehicleNo)]),
+    [api.vehicles, api.trips],
+  );
 
-  if (!api.expensesReady) {
-    return (
-      <Card title="One-time setup needed for Expenses">
-        <p className="mb-2">The expenses table does not exist in your database yet. Your trips are safe — this only adds a new table.</p>
-        <ol className="list-decimal space-y-1 pl-5 text-[14px]">
-          <li>Open <b>supabase.com</b> → your project → <b>SQL Editor</b> → <b>New query</b>.</li>
-          <li>Open the file <code>expenses-setup.sql</code> from the project folder, copy all of it, paste it, and click <b>Run</b>.</li>
-          <li>Come back here and click <b>⟳ Sync</b> at the top.</li>
-        </ol>
-      </Card>
-    );
-  }
 
   const reset = () => { setForm(blank()); setEditingId(null); };
 
@@ -76,7 +72,7 @@ export function ExpensesTab({ api }: { api: AppApi }) {
       notes: form.notes.trim(),
     };
     setSaving(true);
-    if (await api.saveExpense(exp)) {
+    if (await api.save("expenses", exp)) {
       api.toast(old ? "Expense updated ✔" : "Expense saved ✔");
       setForm({ ...blank(), date: form.date, category: form.category });
       setEditingId(null);
@@ -91,18 +87,17 @@ export function ExpensesTab({ api }: { api: AppApi }) {
   };
   const del = async (x: Expense) => {
     if (!confirm(`Delete this expense?\n${fmtDate(x.date)}  ${x.category}  ${rs(x.amount)}`)) return;
-    if (await api.removeExpense(x.id)) { if (editingId === x.id) reset(); api.toast("Expense deleted"); }
+    if (await api.remove("expenses", x.id)) { if (editingId === x.id) reset(); api.toast("Expense deleted"); }
   };
 
   const csv = () => {
     if (!list.length) { alert("No expenses found."); return; }
-    const q = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const rows: unknown[][] = [
       ["Date", "Type", "Paid To", "Vehicle", "Amount", "Notes"],
       ...list.map((x) => [fmtDate(x.date), x.category, x.paidTo, x.vehicleNo, x.amount, x.notes]),
       ["", "", "", "TOTAL", total, ""],
     ];
-    downloadBlob(new Blob(["﻿" + rows.map((r) => r.map(q).join(",")).join("\r\n")], { type: "text/csv" }), `Expenses_${from || "all"}_${to || ""}.csv`);
+    downloadBlob(csvBlob(rows), `Expenses_${from || "all"}_${to || ""}.csv`);
   };
 
   return (
@@ -140,9 +135,7 @@ export function ExpensesTab({ api }: { api: AppApi }) {
           <Button variant="secondary" onClick={reset}>Clear</Button>
         </div>
         <datalist id="paidto-list">{paidToList.map((p) => <option key={p} value={p} />)}</datalist>
-        <datalist id="vehicle-list">
-          {[...new Set(api.trips.map((t) => t.vehicleNo).filter(Boolean))].sort().map((v) => <option key={v} value={v} />)}
-        </datalist>
+        <datalist id="vehicle-list">{vehicleList.map((v) => <option key={v} value={v} />)}</datalist>
       </Card>
 
       <Card title="Expense List">
@@ -158,6 +151,10 @@ export function ExpensesTab({ api }: { api: AppApi }) {
               <option value="">All types</option>
               {categories.map((c) => <option key={c}>{c}</option>)}
             </select>
+          </Field>
+          <Field label="Vehicle">
+            <input className="field" list="vehicle-list" placeholder="All vehicles" autoCapitalize="characters" value={vehFilter}
+              onChange={(e) => setVehFilter(formatVehicleNo(e.target.value))} />
           </Field>
         </div>
         <div className="mt-3 mb-3 flex flex-wrap gap-2">

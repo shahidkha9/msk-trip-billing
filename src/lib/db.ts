@@ -1,53 +1,47 @@
 import { getSupabase } from "./supabase";
-import { migrateSettings, normalizeExpense, normalizeTrip } from "./defaults";
+import { migrateSettings, normalizers } from "./defaults";
 import { newId } from "./utils";
-import type { Expense, Settings, Trip } from "./types";
+import type { AdminUser, Customer, Expense, Profile, Receipt, Settings, TableMap, TableName, Trip, Vehicle } from "./types";
 
 const now = () => new Date().toISOString();
+export const TABLES: TableName[] = ["trips", "expenses", "customers", "vehicles", "receipts"];
 
-/** Reads every row of a table for this user (1000 at a time). */
-async function readAll<T>(table: "trips" | "expenses", userId: string): Promise<{ id: string; data: Partial<T> }[]> {
+/** True when the error means "this table / function does not exist yet" (database not upgraded). */
+export function isMissing(e: unknown): boolean {
+  const x = e as { code?: string; message?: string } | null;
+  return !!x && (x.code === "PGRST205" || x.code === "PGRST202" || x.code === "42P01" || x.code === "42883" ||
+    /could not find the (table|function)|does not exist/i.test(x.message ?? ""));
+}
+
+/** Turns any error into a short message a person can read. */
+export function errMsg(e: unknown): string {
+  const m = e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : String(e);
+  if (/row-level security|permission denied/i.test(m)) return "Your account cannot save right now (trial or subscription ended).";
+  return m;
+}
+
+/* ---------- generic table access ---------- */
+async function readAll<K extends TableName>(table: K, userId: string): Promise<TableMap[K][]> {
   const sb = getSupabase();
-  const rows: { id: string; data: Partial<T> }[] = [];
+  const out: TableMap[K][] = [];
   for (let from = 0; ; from += 1000) {
     const q = await sb.from(table).select("id,data").eq("user_id", userId).order("id").range(from, from + 999);
     if (q.error) throw q.error;
-    rows.push(...(q.data ?? []));
+    for (const r of q.data ?? []) out.push((normalizers[table] as (id: string, d: unknown) => TableMap[K])(r.id, r.data));
     if (!q.data || q.data.length < 1000) break;
   }
-  return rows;
+  return out;
 }
 
-export interface Everything {
-  settings: Settings;
-  trips: Trip[];
-  expenses: Expense[];
-  /** false when the expenses table has not been created yet (run expenses-setup.sql) */
-  expensesReady: boolean;
+export async function saveItem<K extends TableName>(table: K, userId: string, item: TableMap[K]) {
+  const { id, ...data } = item;
+  const { error } = await getSupabase().from(table).upsert({ id, user_id: userId, data, updated_at: now() });
+  if (error) throw error;
 }
 
-/** Loads all of the user's settings, trips and expenses from the cloud. */
-export async function loadEverything(userId: string): Promise<Everything> {
-  const sb = getSupabase();
-  const s = await sb.from("settings").select("data").eq("user_id", userId).maybeSingle();
-  if (s.error) throw s.error;
-
-  const tripRows = await readAll<Trip>("trips", userId);
-
-  // Expenses are loaded separately so the app still works before the new table exists.
-  let expenses: Expense[] = [];
-  let expensesReady = true;
-  try {
-    const expRows = await readAll<Expense>("expenses", userId);
-    expenses = expRows.map((r) => normalizeExpense(r.id, r.data));
-  } catch (e) {
-    console.warn("Expenses not available:", e);
-    expensesReady = false;
-  }
-
-  const { settings, changed } = migrateSettings(s.data?.data as Partial<Settings> | undefined);
-  if (changed) await saveSettings(userId, settings);
-  return { settings, trips: tripRows.map((r) => normalizeTrip(r.id, r.data)), expenses, expensesReady };
+export async function deleteItem(table: TableName, id: string) {
+  const { error } = await getSupabase().from(table).delete().eq("id", id);
+  if (error) throw error;
 }
 
 export async function saveSettings(userId: string, settings: Settings) {
@@ -55,83 +49,127 @@ export async function saveSettings(userId: string, settings: Settings) {
   if (error) throw error;
 }
 
-/* ---------- trips ---------- */
-export async function saveTrip(userId: string, trip: Trip) {
-  const { id, ...data } = trip;
-  const { error } = await getSupabase().from("trips").upsert({ id, user_id: userId, data, updated_at: now() });
-  if (error) throw error;
+/* ---------- profile / subscription ---------- */
+type ProfileRow = {
+  user_id: string; email: string | null; business_name: string | null; phone: string | null; status: string;
+  is_admin: boolean; trial_ends_at: string | null; paid_until: string | null; admin_note: string | null; created_at: string;
+};
+const toProfile = (r: ProfileRow): Profile => ({
+  userId: r.user_id, email: r.email ?? "", businessName: r.business_name ?? "", phone: r.phone ?? "",
+  status: r.status === "suspended" ? "suspended" : "active", isAdmin: !!r.is_admin,
+  trialEndsAt: r.trial_ends_at, paidUntil: r.paid_until, adminNote: r.admin_note ?? "", createdAt: r.created_at,
+});
+
+/* ---------- load everything ---------- */
+export interface Everything {
+  settings: Settings;
+  profile: Profile | null;
+  trips: Trip[];
+  expenses: Expense[];
+  customers: Customer[];
+  vehicles: Vehicle[];
+  receipts: Receipt[];
+  /** the database still needs supabase-setup.sql (new tables / profiles missing) */
+  upgradeNeeded: boolean;
 }
 
-export async function deleteTrip(id: string) {
-  const { error } = await getSupabase().from("trips").delete().eq("id", id);
-  if (error) throw error;
-}
+export async function loadEverything(userId: string): Promise<Everything> {
+  const sb = getSupabase();
+  const empty = { trips: [], expenses: [], customers: [], vehicles: [], receipts: [] };
 
-/* ---------- expenses ---------- */
-export async function saveExpense(userId: string, expense: Expense) {
-  const { id, ...data } = expense;
-  const { error } = await getSupabase().from("expenses").upsert({ id, user_id: userId, data, updated_at: now() });
-  if (error) throw error;
-}
+  const p = await sb.from("profiles").select("*").eq("user_id", userId).maybeSingle();
+  if (p.error) {
+    if (isMissing(p.error)) return { settings: migrateSettings(null).settings, profile: null, ...empty, upgradeNeeded: true };
+    throw p.error;
+  }
+  const s = await sb.from("settings").select("data").eq("user_id", userId).maybeSingle();
+  if (s.error) throw s.error;
 
-export async function deleteExpense(id: string) {
-  const { error } = await getSupabase().from("expenses").delete().eq("id", id);
-  if (error) throw error;
+  let data: Pick<Everything, TableName>;
+  try {
+    const [trips, expenses, customers, vehicles, receipts] = await Promise.all(TABLES.map((t) => readAll(t, userId)));
+    data = {
+      trips: trips as Trip[], expenses: expenses as Expense[], customers: customers as Customer[],
+      vehicles: vehicles as Vehicle[], receipts: receipts as Receipt[],
+    };
+  } catch (e) {
+    if (isMissing(e)) return { settings: migrateSettings(null).settings, profile: null, ...empty, upgradeNeeded: true };
+    throw e;
+  }
+
+  const raw = s.data?.data as Partial<Settings> | undefined;
+  const { settings, changed } = migrateSettings(raw);
+  let save = changed && !!raw;
+
+  // Older versions had one "Bill To" company. Turn it into a customer, once.
+  if (!settings.defaultCustomerId && settings.billTo.trim() && data.trips.some((t) => !t.customerId)) {
+    const existing = data.customers.find((c) => c.name.trim().toLowerCase() === settings.billTo.trim().toLowerCase());
+    const c: Customer = existing ?? { id: newId(), name: settings.billTo.trim(), phone: "", address: "", notes: "", created: Date.now() };
+    if (!existing) { await saveItem("customers", userId, c); data.customers.push(c); }
+    settings.defaultCustomerId = c.id;
+    save = true;
+  }
+  if (save) await saveSettings(userId, settings);
+  // Trips saved before customers existed belong to the default customer.
+  if (settings.defaultCustomerId) {
+    for (const t of data.trips) if (!t.customerId) t.customerId = settings.defaultCustomerId;
+  }
+
+  return { settings, profile: p.data ? toProfile(p.data as ProfileRow) : null, ...data, upgradeNeeded: false };
 }
 
 /* ---------- bulk ---------- */
-export async function deleteAllData(userId: string, includeExpenses: boolean) {
+export async function deleteAllData(userId: string) {
   const sb = getSupabase();
-  const t = await sb.from("trips").delete().eq("user_id", userId);
-  if (t.error) throw t.error;
-  if (includeExpenses) {
-    const e = await sb.from("expenses").delete().eq("user_id", userId);
-    if (e.error) throw e.error;
-  }
-}
-
-async function insertRows(table: "trips" | "expenses", rows: { id: string; user_id: string; data: unknown; updated_at: string }[]) {
-  for (let i = 0; i < rows.length; i += 500) {
-    const r = await getSupabase().from(table).upsert(rows.slice(i, i + 500));
+  for (const t of TABLES) {
+    const r = await sb.from(t).delete().eq("user_id", userId);
     if (r.error) throw r.error;
   }
 }
 
-/**
- * Replaces ALL online data with the contents of a backup file.
- * Expenses are replaced only if the backup contains them (older backups don't).
- */
-export async function replaceAll(
-  userId: string,
-  settings: Settings,
-  trips: Partial<Trip>[],
-  expenses: Partial<Expense>[] | null,
-  expensesReady: boolean,
-) {
-  const replaceExpenses = expensesReady && Array.isArray(expenses);
-  await deleteAllData(userId, replaceExpenses);
-  const stamp = now();
-  await insertRows(
-    "trips",
-    trips.map((t) => {
-      const { id, ...data } = normalizeTrip(t.id || newId(), t);
-      return { id, user_id: userId, data, updated_at: stamp };
-    }),
-  );
-  if (replaceExpenses) {
-    await insertRows(
-      "expenses",
-      expenses!.map((x) => {
-        const { id, ...data } = normalizeExpense(x.id || newId(), x);
-        return { id, user_id: userId, data, updated_at: stamp };
-      }),
-    );
-  }
-  await saveSettings(userId, settings);
+export interface BackupData {
+  settings: Settings;
+  trips: Partial<Trip>[];
+  expenses?: Partial<Expense>[];
+  customers?: Partial<Customer>[];
+  vehicles?: Partial<Vehicle>[];
+  receipts?: Partial<Receipt>[];
 }
 
-/** Turns any error into a short message a person can read. */
-export function errMsg(e: unknown): string {
-  if (e && typeof e === "object" && "message" in e) return String((e as { message: unknown }).message);
-  return String(e);
+/** Replaces online data with a backup. Tables missing from an older backup are left as they are. */
+export async function replaceAll(userId: string, b: BackupData) {
+  const sb = getSupabase();
+  const stamp = now();
+  for (const t of TABLES) {
+    const list = b[t] as Partial<TableMap[typeof t]>[] | undefined;
+    if (!Array.isArray(list)) continue;
+    const del = await sb.from(t).delete().eq("user_id", userId);
+    if (del.error) throw del.error;
+    const rows = list.map((x) => {
+      const item = (normalizers[t] as (id: string, d: unknown) => TableMap[typeof t])(x.id || newId(), x);
+      const { id, ...data } = item;
+      return { id, user_id: userId, data, updated_at: stamp };
+    });
+    for (let i = 0; i < rows.length; i += 500) {
+      const r = await sb.from(t).upsert(rows.slice(i, i + 500));
+      if (r.error) throw r.error;
+    }
+  }
+  await saveSettings(userId, b.settings);
+}
+
+/* ---------- admin ---------- */
+type AdminRow = ProfileRow & { trip_count: number; last_activity: string | null };
+
+export async function adminListUsers(): Promise<AdminUser[]> {
+  const { data, error } = await getSupabase().rpc("admin_list_users");
+  if (error) throw error;
+  return ((data ?? []) as AdminRow[]).map((r) => ({ ...toProfile(r), tripCount: Number(r.trip_count) || 0, lastActivity: r.last_activity }));
+}
+
+export async function adminUpdateUser(u: Pick<Profile, "userId" | "status" | "trialEndsAt" | "paidUntil" | "adminNote">) {
+  const { error } = await getSupabase().rpc("admin_update_user", {
+    p_target: u.userId, p_status: u.status, p_trial_ends: u.trialEndsAt, p_paid_until: u.paidUntil, p_note: u.adminNote,
+  });
+  if (error) throw error;
 }

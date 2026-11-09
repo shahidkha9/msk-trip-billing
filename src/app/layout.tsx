@@ -1,10 +1,11 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { PRODUCT_NAME, PRODUCT_TAGLINE } from "@/lib/brand";
 
 export const metadata: Metadata = {
-  title: "MSK Trip Billing",
-  description: "MSK Transport Service — trip entries, automatic fares and PDF bills",
-  appleWebApp: { capable: true, title: "MSK Trips", statusBarStyle: "default" },
+  title: PRODUCT_NAME,
+  description: PRODUCT_TAGLINE,
+  appleWebApp: { capable: true, title: PRODUCT_NAME, statusBarStyle: "default" },
 };
 
 export const viewport: Viewport = {

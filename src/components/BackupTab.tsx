@@ -2,7 +2,9 @@
 
 import { useEffect, useState, type ChangeEvent } from "react";
 import { migrateSettings } from "@/lib/defaults";
-import type { Expense, Settings, Trip } from "@/lib/types";
+import type { BackupData } from "@/lib/db";
+import { TABLES } from "@/lib/db";
+import type { Settings, Trip } from "@/lib/types";
 import { downloadBlob, today } from "@/lib/utils";
 import { Button, Card } from "./ui";
 import type { AppApi } from "./types";
@@ -18,7 +20,10 @@ export function BackupTab({ api }: { api: AppApi }) {
   }, []);
 
   const download = () => {
-    const data = { app: "tripbill", version: 4, savedAt: new Date().toISOString(), settings: api.settings, trips: api.trips, expenses: api.expenses };
+    const data = {
+      app: "tripbill", version: 5, savedAt: new Date().toISOString(), settings: api.settings,
+      trips: api.trips, expenses: api.expenses, customers: api.customers, vehicles: api.vehicles, receipts: api.receipts,
+    };
     downloadBlob(new Blob([JSON.stringify(data, null, 1)], { type: "application/json" }), `MSK_Backup_${today()}.json`);
     const now = Date.now();
     try { localStorage.setItem(LAST_BACKUP_KEY, String(now)); } catch { /* ignore */ }
@@ -30,7 +35,7 @@ export function BackupTab({ api }: { api: AppApi }) {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
-    let d: { app?: string; settings?: Partial<Settings>; trips?: Partial<Trip>[]; expenses?: Partial<Expense>[] };
+    let d: Omit<BackupData, "settings" | "trips"> & { app?: string; settings?: Partial<Settings>; trips?: Partial<Trip>[] };
     try {
       d = JSON.parse(await file.text());
       if (d.app !== "tripbill" || !Array.isArray(d.trips)) throw new Error("bad file");
@@ -38,28 +43,28 @@ export function BackupTab({ api }: { api: AppApi }) {
       alert("This is not a valid backup file.");
       return;
     }
-    const hasExp = Array.isArray(d.expenses);
-    const msg = hasExp
-      ? `This backup has ${d.trips!.length} trips and ${d.expenses!.length} expenses. Your current online data (${api.trips.length} trips, ${api.expenses.length} expenses) will be REPLACED on all devices. Continue?`
-      : `This backup has ${d.trips!.length} trips (it is from an older version, without expenses). Your current ${api.trips.length} trips will be REPLACED on all devices. Your expenses will NOT be changed. Continue?`;
+    const parts = TABLES.filter((t) => Array.isArray(d[t])).map((t) => `${(d[t] as unknown[]).length} ${t}`);
+    const msg = `This backup has: ${parts.join(", ")}.
+
+These will REPLACE your current online data on all devices. Anything not in the backup is left as it is. Continue?`;
     if (!confirm(msg)) return;
     setBusy(true);
-    const ok = await api.replaceAll(migrateSettings(d.settings).settings, d.trips!, hasExp ? d.expenses! : null);
+    const ok = await api.replaceAll({ ...d, settings: migrateSettings(d.settings).settings, trips: d.trips! });
     setBusy(false);
     if (ok) api.toast("Backup restored ✔");
   };
 
   const wipe = async () => {
-    if (!confirm("Are you sure? ALL trips and expenses will be deleted from ALL devices.")) return;
+    if (!confirm("Are you sure? ALL trips, expenses, customers, vehicles and payments will be deleted from ALL devices.")) return;
     if (prompt("Type DELETE to confirm") !== "DELETE") return;
-    if (await api.wipeAll()) api.toast("All trips and expenses deleted");
+    if (await api.wipeAll()) api.toast("All data deleted");
   };
 
   return (
     <>
       <Card title="Backup (Extra Safety)">
         <p className="mb-2">
-          Your trips and expenses are saved online and show on every device where you log in. Still, download a backup file{" "}
+          Your data is saved online and show on every device where you log in. Still, download a backup file{" "}
           <b>once a month</b> and keep it on Google Drive or WhatsApp, in case of any account problem.
         </p>
         <p className="mb-2">
@@ -78,7 +83,7 @@ export function BackupTab({ api }: { api: AppApi }) {
         </div>
       </Card>
       <Card title="Danger Zone">
-        <Button variant="danger" onClick={wipe}>Delete All Trips & Expenses</Button>
+        <Button variant="danger" onClick={wipe}>Delete All Data</Button>
       </Card>
     </>
   );

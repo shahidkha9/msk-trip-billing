@@ -1,8 +1,8 @@
-import type { Settings, Trip } from "./types";
-import { billNo, fmtDate, num, sums, today, tripTotal } from "./utils";
+import type { Customer, Settings, Trip } from "./types";
+import { billNo, csvBlob, fmtDate, num, sums, today, tripTotal } from "./utils";
 
 /** Builds and downloads the bill as a PDF (A4 landscape). */
-export async function downloadBillPdf(list: Trip[], settings: Settings, period: string) {
+export async function downloadBillPdf(list: Trip[], settings: Settings, period: string, customer: Customer | null) {
   // Loaded only when needed, so the app opens faster.
   const { jsPDF } = await import("jspdf");
   const { autoTable } = await import("jspdf-autotable");
@@ -10,7 +10,7 @@ export async function downloadBillPdf(list: Trip[], settings: Settings, period: 
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
   const s = sums(list);
   const W = 297;
-  const name = settings.businessName || "MSK Transport Service";
+  const name = settings.businessName || "Transport Service";
 
   // Header band
   doc.setFillColor(30, 64, 120);
@@ -19,15 +19,19 @@ export async function downloadBillPdf(list: Trip[], settings: Settings, period: 
   doc.setFontSize(17);
   doc.text(name, 14, 11);
   doc.setFontSize(9.5);
-  doc.text((settings.phone ? `Phone: ${settings.phone}   ` : "") + "Transport Bill", 14, 18);
+  doc.text([settings.phone ? `Phone: ${settings.phone}` : "", settings.address, "Transport Bill"].filter(Boolean).join("   |   "), 14, 18);
   doc.setFontSize(10);
   doc.text(`Bill No: ${billNo()}`, W - 14, 11, { align: "right" });
   doc.text(`Bill Date: ${fmtDate(today())}`, W - 14, 18, { align: "right" });
 
   doc.setTextColor(28, 36, 51);
   doc.setFontSize(11);
-  doc.text(`Bill To: ${settings.billTo || ""}`, 14, 32);
-  doc.text(`Period: ${period}`, W - 14, 32, { align: "right" });
+  doc.setFont("helvetica", "bold");
+  doc.text(`Bill To: ${customer?.name ?? ""}`, 14, 31);
+  doc.setFont("helvetica", "normal");
+  doc.text(`Period: ${period}`, W - 14, 31, { align: "right" });
+  const cLine = [customer?.address, customer?.phone ? `Ph: ${customer.phone}` : ""].filter(Boolean).join("   ");
+  if (cLine) { doc.setFontSize(9); doc.text(cLine, 14, 35.5); doc.setFontSize(11); }
 
   const body = list.map((t, i) => [
     i + 1, fmtDate(t.date), t.slipNo, t.vehicleNo, t.vehicleType, `${t.from}  >  ${t.to}`, t.route, t.qty,
@@ -36,7 +40,7 @@ export async function downloadBillPdf(list: Trip[], settings: Settings, period: 
   ]);
 
   autoTable(doc, {
-    startY: 37,
+    startY: 39,
     head: [["#", "Date", "Slip No", "Vehicle", "Type", "From > To", "Route", "Qty", "Fare", "Load/Unload", "Detention", "Extra", "Total"]],
     body,
     foot: [["", "", "", "", "", "", "", "Total", num(s.rent), num(s.load), num(s.detention), num(s.extra), num(s.total)]],
@@ -91,21 +95,21 @@ export async function downloadBillPdf(list: Trip[], settings: Settings, period: 
   doc.text("Prepared By", 14, y + 27);
   doc.text("Received / Approved By", W - 74, y + 27);
 
-  const company = (settings.billTo || "Bill").split(" ")[0];
+  const company = (customer?.name || "Bill").split(" ")[0].replace(/[^\w-]/g, "");
   doc.save(`Bill_${company}_${period.replace(/\//g, "-").replace(/ /g, "")}.pdf`);
 }
 
-/** Builds and downloads a CSV file that opens in Excel. */
-export function buildCsv(list: Trip[]): Blob {
-  const q = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+/** Builds a CSV file of trips that opens in Excel. */
+export function buildCsv(list: Trip[], customerName: (id: string) => string): Blob {
   const s = sums(list);
-  const rows: unknown[][] = [
-    ["Date", "Slip No", "Bilty No", "Vehicle No", "Vehicle Type", "From", "To", "Route", "Quantity", "Fare", "Loading/Unloading", "Detention", "Extra", "Total", "Notes"],
+  return csvBlob([
+    ["Date", "Customer", "Slip No", "Bilty No", "Vehicle No", "Vehicle Type", "Driver", "From", "To", "Route", "Quantity",
+      "Fare", "Loading/Unloading", "Detention", "Extra", "Bill Total", "Vehicle Owner", "Owner Payment", "Owner Paid?", "Notes"],
     ...list.map((t) => [
-      fmtDate(t.date), t.slipNo, t.biltyNo, t.vehicleNo, t.vehicleType, t.from, t.to, t.route, t.qty, t.rent,
-      t.loading ? t.loadAmt : 0, t.detention ? t.detentionAmt : 0, t.extra || 0, tripTotal(t), t.notes,
+      fmtDate(t.date), customerName(t.customerId), t.slipNo, t.biltyNo, t.vehicleNo, t.vehicleType, t.driverName, t.from, t.to,
+      t.route, t.qty, t.rent, t.loading ? t.loadAmt : 0, t.detention ? t.detentionAmt : 0, t.extra || 0, tripTotal(t),
+      t.hired ? t.hiredParty : "", t.hired ? t.hiredCost : 0, t.hired ? (t.hiredPaid ? "Paid" : "Not paid") : "", t.notes,
     ]),
-    ["", "", "", "", "", "", "", "", "TOTAL", s.rent, s.load, s.detention, s.extra, s.total, ""],
-  ];
-  return new Blob(["﻿" + rows.map((r) => r.map(q).join(",")).join("\r\n")], { type: "text/csv" });
+    ["", "", "", "", "", "", "", "", "", "", "TOTAL", s.rent, s.load, s.detention, s.extra, s.total, "", "", "", ""],
+  ]);
 }
