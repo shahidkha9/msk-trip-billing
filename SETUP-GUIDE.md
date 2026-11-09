@@ -79,6 +79,25 @@ Har device par sirf ek dafa login karna hai.
 
 ---
 
+## Update: Expenses, Outside Vehicles aur Profit (Nov 2026)
+
+**Naye features:**
+- **Outside (hired) vehicle:** trip entry mein "Outside (hired) vehicle" chunein, owner ka naam aur use dene wali raqam likhein, aur "Already paid them" tick karein agar de chuke hain. Customer ke bill par ye **nazar nahi aata**.
+- **💸 Expenses tab:** driver salary, repair, tyres, toll waghaira. Apni types "Rates & Locations" mein add kar sakte hain.
+- **📊 Profit & Payments tab:** Income − Outside vehicle cost − Expenses = **Net Profit**. Neeche list hai ke kis outside gaari ko kitna dena baqi hai, aur **Mark Paid** ka button bhi.
+
+**Purane setup par update kaise karein (ek dafa):**
+1. **Supabase → SQL Editor → New query** → `expenses-setup.sql` ka sara text paste karein → **Run**. (Isse sirf naya table banta hai; trips ko kuch nahi hota.)
+2. Naye zip ka **`src` folder** apne project folder mein copy karein aur purane `src` ko **replace** karein. Saath mein `expenses-setup.sql`, `supabase-setup.sql` aur `SETUP-GUIDE.md` bhi copy kar lein. ⚠️ `.env.local`, `node_modules` aur `.git` ko na chhuein.
+3. Test: `npm run dev` → http://localhost:3000.
+4. Upload:
+   ```
+   git add .
+   git commit -m "Add expenses, outside vehicles and profit"
+   git push
+   ```
+   Vercel 1–2 minute mein khud nayi version live kar dega.
+
 ## Is version mein kya naya hai
 
 - **Mazda 20 ft** — rate 17 ft se Rs 2,000 zyada: Landhi **8,000**, Korangi **9,500**, SITE **17,000**.

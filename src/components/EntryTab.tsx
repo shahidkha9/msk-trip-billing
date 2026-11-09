@@ -20,6 +20,10 @@ interface Form {
   rent: string;
   extra: string;
   loading: boolean;
+  hired: boolean;
+  hiredParty: string;
+  hiredCost: string;
+  hiredPaid: boolean;
   detention: boolean;
   notes: string;
 }
@@ -27,6 +31,7 @@ interface Form {
 const emptyForm = (vehicleType: string): Form => ({
   date: today(), slipNo: "", biltyNo: "", vehicleNo: "", vehicleType, from: "", to: "", route: "",
   qty: "", rent: "", extra: "", loading: false, detention: false, notes: "",
+  hired: false, hiredParty: "", hiredCost: "", hiredPaid: false,
 });
 
 interface Props {
@@ -50,6 +55,8 @@ export function EntryTab({ api, editingId, setEditingId, onDelete }: Props) {
       vehicleType: editing.vehicleType, from: editing.from, to: editing.to, route: editing.route, qty: editing.qty,
       rent: String(editing.rent || ""), extra: editing.extra ? String(editing.extra) : "",
       loading: editing.loading, detention: editing.detention, notes: editing.notes,
+      hired: editing.hired, hiredParty: editing.hiredParty, hiredCost: editing.hiredCost ? String(editing.hiredCost) : "",
+      hiredPaid: editing.hiredPaid,
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -64,6 +71,7 @@ export function EntryTab({ api, editingId, setEditingId, onDelete }: Props) {
   const ld = form.loading ? loadAmt : 0;
   const dt = form.detention ? detentionAmt : 0;
   const total = rent + ld + dt + extra;
+  const hiredCost = form.hired ? Number(form.hiredCost) || 0 : 0;
 
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -91,7 +99,13 @@ export function EntryTab({ api, editingId, setEditingId, onDelete }: Props) {
 
   const reset = (keep: boolean) => {
     const base = emptyForm(keep ? form.vehicleType : settings.vehicles[0] ?? "");
-    if (keep) { base.date = form.date; base.vehicleNo = form.vehicleNo; }
+    if (keep) {
+      base.date = form.date;
+      base.vehicleNo = form.vehicleNo;
+      // Same vehicle next time? Then it's probably the same outside owner too.
+      base.hired = form.hired;
+      base.hiredParty = form.hiredParty;
+    }
     setForm(base);
     setEditingId(null);
   };
@@ -105,6 +119,8 @@ export function EntryTab({ api, editingId, setEditingId, onDelete }: Props) {
     if (!form.to.trim()) missing.push("To");
     if (!form.route) missing.push("Route");
     if (!rent) missing.push("Fare");
+    if (form.hired && !form.hiredParty.trim()) missing.push("Outside vehicle owner");
+    if (form.hired && !hiredCost) missing.push("Amount to pay outside vehicle");
     if (missing.length) { alert("Please fill in: " + missing.join(", ")); return; }
     const slip = form.slipNo.trim();
     if (!editing && slip && trips.some((t) => t.slipNo === slip) && !confirm(`Slip No. ${slip} already exists. Save anyway?`)) return;
@@ -117,6 +133,12 @@ export function EntryTab({ api, editingId, setEditingId, onDelete }: Props) {
       loading: form.loading, loadAmt: form.loading ? loadAmt : 0,
       detention: form.detention, detentionAmt: form.detention ? detentionAmt : 0,
       notes: form.notes.trim(),
+      hired: form.hired,
+      hiredParty: form.hired ? form.hiredParty.trim() : "",
+      hiredCost,
+      hiredPaid: form.hired && form.hiredPaid,
+      // keep the original payment date when editing; otherwise today
+      hiredPaidDate: form.hired && form.hiredPaid ? (editing?.hiredPaid && editing.hiredPaidDate ? editing.hiredPaidDate : today()) : "",
     };
 
     setSaving(true);
@@ -138,6 +160,7 @@ export function EntryTab({ api, editingId, setEditingId, onDelete }: Props) {
   const dayTrips = useMemo(() => sortTrips(trips.filter((t) => t.date === (form.date || today()))), [trips, form.date]);
   const dayTotal = dayTrips.reduce((s, t) => s + tripTotal(t), 0);
   const locationList = useMemo(() => Object.keys(settings.locations).sort(), [settings.locations]);
+  const ownerList = useMemo(() => [...new Set(trips.map((t) => t.hiredParty).filter(Boolean))].sort(), [trips]);
   const vehicleList = useMemo(() => [...new Set(trips.map((t) => t.vehicleNo).filter(Boolean))].sort(), [trips]);
 
   return (
@@ -209,9 +232,53 @@ export function EntryTab({ api, editingId, setEditingId, onDelete }: Props) {
           </label>
         </div>
 
+        {/* Own or outside vehicle */}
+        <div className="mt-3 rounded-xl border border-line p-3">
+          <div className="mb-2 text-[13px] text-muted">Whose vehicle did this trip?</div>
+          <div className="flex flex-wrap gap-2">
+            {[
+              { v: false, label: "🚚 My own vehicle" },
+              { v: true, label: "🤝 Outside (hired) vehicle" },
+            ].map((o) => (
+              <button
+                key={String(o.v)}
+                type="button"
+                onClick={() => set("hired", o.v)}
+                className={`cursor-pointer rounded-lg border px-3.5 py-2 text-sm ${
+                  form.hired === o.v ? "border-brand bg-brand text-white" : "border-line bg-white text-ink"
+                }`}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+          {form.hired && (
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <Field label="Outside vehicle owner / driver *">
+                <input className="field" list="owner-list" placeholder="e.g. Aslam Goods" value={form.hiredParty}
+                  onChange={(e) => set("hiredParty", e.target.value)} />
+              </Field>
+              <Field label="Amount to pay them (Rs) *">
+                <input type="number" min={0} inputMode="numeric" className="field" value={form.hiredCost}
+                  onChange={(e) => set("hiredCost", e.target.value)} />
+              </Field>
+              <label className="flex cursor-pointer items-center gap-2.5 self-end rounded-lg bg-soft p-2.5">
+                <input type="checkbox" className="size-5 accent-brand" checked={form.hiredPaid} onChange={(e) => set("hiredPaid", e.target.checked)} />
+                <span>Already paid them</span>
+              </label>
+            </div>
+          )}
+        </div>
+
         <div className="my-3.5 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-soft px-3.5 py-3">
           <div className="text-[13px] text-muted">
             Fare {num(rent)} + Loading {num(ld)} + Detention {num(dt)} + Extra {num(extra)}
+            {form.hired && (
+              <div className="mt-1">
+                Outside vehicle cost: <b className="text-bad">− {num(hiredCost)}</b> &nbsp;→&nbsp; Your margin:{" "}
+                <b className={total - hiredCost < 0 ? "text-bad" : "text-ok"}>{rs(total - hiredCost)}</b>
+              </div>
+            )}
           </div>
           <div>
             Trip Total: <span className="text-2xl font-bold text-brand">{rs(total)}</span>
@@ -230,6 +297,7 @@ export function EntryTab({ api, editingId, setEditingId, onDelete }: Props) {
         </p>
 
         <datalist id="location-list">{locationList.map((l) => <option key={l} value={l} />)}</datalist>
+        <datalist id="owner-list">{ownerList.map((o) => <option key={o} value={o} />)}</datalist>
         <datalist id="vehicle-list">{vehicleList.map((v) => <option key={v} value={v} />)}</datalist>
       </Card>
 

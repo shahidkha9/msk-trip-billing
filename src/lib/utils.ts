@@ -90,3 +90,21 @@ export function billNo() {
   const d = new Date(), p = (n: number) => String(n).padStart(2, "0");
   return `B-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
 }
+
+/* ---------- outside (hired) vehicles ---------- */
+/** What you owe the outside vehicle for this trip (0 for your own vehicle). */
+export const hiredCostOf = (t: Trip) => (t.hired ? Number(t.hiredCost) || 0 : 0);
+/** Your margin on this trip: what the customer pays minus what you pay the outside vehicle. */
+export const tripMargin = (t: Trip) => tripTotal(t) - hiredCostOf(t);
+
+/* ---------- date ranges ---------- */
+export type RangePreset = "thismonth" | "lastmonth" | "week" | "all";
+/** Returns [from, to] as YYYY-MM-DD ("" = no limit). */
+export function rangeFor(r: RangePreset): [string, string] {
+  const d = new Date(), y = d.getFullYear(), m = d.getMonth();
+  if (r === "thismonth") return [isoLocal(new Date(y, m, 1)), isoLocal(new Date(y, m + 1, 0))];
+  if (r === "lastmonth") return [isoLocal(new Date(y, m - 1, 1)), isoLocal(new Date(y, m, 0))];
+  if (r === "week") return [isoLocal(new Date(y, m, d.getDate() - 6)), today()];
+  return ["", ""];
+}
+export const inRange = (date: string, from: string, to: string) => (!from || date >= from) && (!to || date <= to);

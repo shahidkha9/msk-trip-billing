@@ -45,7 +45,14 @@ export function TripTable({ trips, onEdit, onDelete, showTotal = false, print = 
             <td className={td}>{i + 1}</td>
             <td className={td}>{fmtDate(t.date)}</td>
             <td className={td}>{t.slipNo}</td>
-            <td className={td}>{t.vehicleNo}</td>
+            <td className={td}>
+              {t.vehicleNo}
+              {t.hired && !print && (
+                <span className="ml-1.5 rounded-md bg-[#fff7e6] px-1.5 py-0.5 text-[11px] text-[#7a4b00]" title={`Outside vehicle: ${t.hiredParty}`}>
+                  Hired
+                </span>
+              )}
+            </td>
             <td className={td}>
               <span className="rounded-md bg-soft px-1.5 py-0.5 text-xs">{t.vehicleType}</span>
             </td>

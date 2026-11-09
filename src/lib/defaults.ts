@@ -1,4 +1,4 @@
-import type { Settings, Trip } from "./types";
+import type { Expense, Settings, Trip } from "./types";
 
 export const DEFAULT_LOAD_CHARGE = 500;
 export const DEFAULT_DETENTION_CHARGE = 2500;
@@ -11,6 +11,10 @@ export const DEFAULT_SETTINGS: Settings = {
   billTo: "Yunus Textile Mills Limited",
   loadCharge: DEFAULT_LOAD_CHARGE,
   detentionCharge: DEFAULT_DETENTION_CHARGE,
+  expenseCategories: [
+    "Driver Salary", "Repair & Maintenance", "Tyres", "Fuel", "Toll / Challan",
+    "Labour", "Mobile & Office", "Token / Fitness / Insurance", "Other",
+  ],
   vehicles: ["Mazda 14 ft", "Mazda 17 ft", "Mazda 20 ft", "Shehzore"],
   routes: {
     Landhi: { "Mazda 14 ft": 5000, "Mazda 17 ft": 6000, "Mazda 20 ft": 8000, Shehzore: 3500 },
@@ -39,6 +43,9 @@ export function migrateSettings(raw: Partial<Settings> | null | undefined): { se
   let changed = false;
   if (typeof raw.detentionCharge !== "number") { s.detentionCharge = DEFAULT_DETENTION_CHARGE; changed = true; }
   if (!Array.isArray(raw.vehicles) || raw.vehicles.length === 0) { s.vehicles = [...DEFAULT_SETTINGS.vehicles]; changed = true; }
+  if (!Array.isArray(s.expenseCategories) || s.expenseCategories.length === 0) {
+    s.expenseCategories = [...DEFAULT_SETTINGS.expenseCategories];
+  }
   if (!s.vehicles.includes("Mazda 20 ft")) {
     const i = s.vehicles.indexOf("Mazda 17 ft");
     s.vehicles.splice(i >= 0 ? i + 1 : s.vehicles.length, 0, "Mazda 20 ft");
@@ -72,6 +79,25 @@ export function normalizeTrip(id: string, d: Partial<Trip>): Trip {
     detention: !!d.detention,
     detentionAmt: Number(d.detentionAmt) || 0,
     extra: Number(d.extra) || 0,
+    notes: d.notes ?? "",
+    created: Number(d.created) || 0,
+    hired: !!d.hired,
+    hiredParty: d.hiredParty ?? "",
+    hiredCost: Number(d.hiredCost) || 0,
+    hiredPaid: !!d.hiredPaid,
+    hiredPaidDate: d.hiredPaidDate ?? "",
+  };
+}
+
+/** Makes sure an expense loaded from storage has every field. */
+export function normalizeExpense(id: string, d: Partial<Expense>): Expense {
+  return {
+    id,
+    date: d.date ?? "",
+    category: d.category ?? "Other",
+    amount: Number(d.amount) || 0,
+    paidTo: d.paidTo ?? "",
+    vehicleNo: d.vehicleNo ?? "",
     notes: d.notes ?? "",
     created: Number(d.created) || 0,
   };

@@ -18,6 +18,18 @@ export function SettingsTab({ api }: { api: AppApi }) {
   const [rates, setRates] = useState<RateCard>(() => JSON.parse(JSON.stringify(settings.routes)));
   const [newRoute, setNewRoute] = useState("");
   const [newLoc, setNewLoc] = useState("");
+  const [newCat, setNewCat] = useState("");
+
+  const addCategory = async () => {
+    const n = newCat.trim();
+    if (!n) return;
+    if (settings.expenseCategories.some((c) => c.toLowerCase() === n.toLowerCase())) { alert("This type already exists"); return; }
+    if (await api.updateSettings({ ...settings, expenseCategories: [...settings.expenseCategories, n] })) { setNewCat(""); api.toast("Expense type added ✔"); }
+  };
+  const deleteCategory = async (c: string) => {
+    if (!confirm(`Remove expense type "${c}"? (Old expenses keep their type.)`)) return;
+    await api.updateSettings({ ...settings, expenseCategories: settings.expenseCategories.filter((x) => x !== c) });
+  };
 
   const saveInfo = async () => {
     const ok = await api.updateSettings({
@@ -179,6 +191,20 @@ export function SettingsTab({ api }: { api: AppApi }) {
               ))}
             </tbody>
           </table>
+        </div>
+      </Card>
+      <Card title="Expense Types">
+        <div className="mb-3 flex flex-wrap gap-2">
+          {settings.expenseCategories.map((c) => (
+            <span key={c} className="flex items-center gap-1.5 rounded-lg bg-soft px-2.5 py-1.5 text-sm">
+              {c}
+              <button className="cursor-pointer text-bad" title="Remove" onClick={() => deleteCategory(c)}>✕</button>
+            </span>
+          ))}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <input className="field max-w-72" placeholder="New type (e.g. Parking)" value={newCat} onChange={(e) => setNewCat(e.target.value)} />
+          <Button variant="secondary" onClick={addCategory}>+ Add Type</Button>
         </div>
       </Card>
     </>

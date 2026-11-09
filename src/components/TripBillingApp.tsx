@@ -4,23 +4,27 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import type { Session } from "@supabase/supabase-js";
 import { getSupabase, isConfigured } from "@/lib/supabase";
 import * as db from "@/lib/db";
-import { cloneSettings, DEFAULT_SETTINGS, migrateSettings, normalizeTrip } from "@/lib/defaults";
-import type { Settings, Trip } from "@/lib/types";
+import { cloneSettings, DEFAULT_SETTINGS, migrateSettings, normalizeExpense, normalizeTrip } from "@/lib/defaults";
+import type { Expense, Settings, Trip } from "@/lib/types";
 import { rs, fmtDate, tripTotal } from "@/lib/utils";
 import { Button, Card, Field } from "./ui";
 import { EntryTab } from "./EntryTab";
 import { RecordsTab } from "./RecordsTab";
 import { SettingsTab } from "./SettingsTab";
+import { ExpensesTab } from "./ExpensesTab";
+import { ProfitTab } from "./ProfitTab";
 import { BackupTab, LAST_BACKUP_KEY } from "./BackupTab";
 import type { AppApi } from "./types";
 
 type Screen = "starting" | "setup" | "login" | "app";
-type Tab = "entry" | "records" | "settings" | "backup";
-const CACHE_KEY = "msk_cache_v2";
+type Tab = "entry" | "records" | "expenses" | "profit" | "settings" | "backup";
+const CACHE_KEY = "msk_cache_v3";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "entry", label: "➕ New Entry" },
   { id: "records", label: "📋 Records & Bills" },
+  { id: "expenses", label: "💸 Expenses" },
+  { id: "profit", label: "📊 Profit & Payments" },
   { id: "settings", label: "⚙️ Rates & Locations" },
   { id: "backup", label: "💾 Backup" },
 ];
@@ -31,6 +35,8 @@ export default function TripBillingApp() {
   const [email, setEmail] = useState("");
   const [settings, setSettings] = useState<Settings>(() => cloneSettings(DEFAULT_SETTINGS));
   const [trips, setTrips] = useState<Trip[]>([]);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [expensesReady, setExpensesReady] = useState(true);
   const [tab, setTab] = useState<Tab>("entry");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [status, setStatus] = useState<{ text: string; kind: "info" | "ok" | "bad" }>({ text: "Loading…", kind: "info" });
@@ -46,8 +52,10 @@ export default function TripBillingApp() {
   }, []);
 
   /* ---------- offline copy (read-only when there is no internet) ---------- */
-  const writeCache = useCallback((uid: string, s: Settings, t: Trip[]) => {
-    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ uid, settings: s, trips: t, at: Date.now() })); } catch { /* ignore */ }
+  const cacheRef = useRef<{ settings: Settings; trips: Trip[]; expenses: Expense[] }>({ settings, trips: [], expenses: [] });
+  const writeCache = useCallback((uid: string, part: Partial<{ settings: Settings; trips: Trip[]; expenses: Expense[] }>) => {
+    cacheRef.current = { ...cacheRef.current, ...part };
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify({ uid, ...cacheRef.current, at: Date.now() })); } catch { /* ignore */ }
   }, []);
 
   /* ---------- load from the cloud ---------- */
@@ -59,7 +67,9 @@ export default function TripBillingApp() {
       const data = await db.loadEverything(uid);
       setSettings(data.settings);
       setTrips(data.trips);
-      writeCache(uid, data.settings, data.trips);
+      setExpenses(data.expenses);
+      setExpensesReady(data.expensesReady);
+      writeCache(uid, { settings: data.settings, trips: data.trips, expenses: data.expenses });
       const time = new Date().toLocaleTimeString("en-PK", { hour: "2-digit", minute: "2-digit" });
       const n = data.trips.length;
       setStatus({ text: `✔ Synced ${time} — ${n} ${n === 1 ? "entry" : "entries"}`, kind: "ok" });
@@ -70,6 +80,7 @@ export default function TripBillingApp() {
         if (c && c.uid === uid) {
           setSettings(migrateSettings(c.settings).settings);
           setTrips((c.trips as Trip[]).map((t) => normalizeTrip(t.id, t)));
+          setExpenses(((c.expenses ?? []) as Expense[]).map((x) => normalizeExpense(x.id, x)));
         }
       } catch { /* ignore */ }
       setStatus({ text: "⚠ No connection — showing last saved copy. New entries need internet. Tap ⟳ Sync to retry.", kind: "bad" });
@@ -122,6 +133,8 @@ export default function TripBillingApp() {
   const api: AppApi = {
     settings,
     trips,
+    expenses,
+    expensesReady,
     toast,
     reload: async () => { if (userId) await loadAll(userId); },
     saveTrip: async (trip) => {
@@ -130,7 +143,7 @@ export default function TripBillingApp() {
         await db.saveTrip(userId, trip);
         setTrips((prev) => {
           const next = prev.some((t) => t.id === trip.id) ? prev.map((t) => (t.id === trip.id ? trip : t)) : [...prev, trip];
-          writeCache(userId, settings, next);
+          writeCache(userId, { trips: next });
           return next;
         });
         return true;
@@ -143,7 +156,41 @@ export default function TripBillingApp() {
       if (!userId) return false;
       try {
         await db.deleteTrip(id);
-        setTrips((prev) => prev.filter((t) => t.id !== id));
+        setTrips((prev) => {
+          const next = prev.filter((t) => t.id !== id);
+          writeCache(userId, { trips: next });
+          return next;
+        });
+        return true;
+      } catch (e) {
+        alert("Could not delete (check your internet).\n" + db.errMsg(e));
+        return false;
+      }
+    },
+    saveExpense: async (exp) => {
+      if (!userId) return false;
+      try {
+        await db.saveExpense(userId, exp);
+        setExpenses((prev) => {
+          const next = prev.some((x) => x.id === exp.id) ? prev.map((x) => (x.id === exp.id ? exp : x)) : [...prev, exp];
+          writeCache(userId, { expenses: next });
+          return next;
+        });
+        return true;
+      } catch (e) {
+        alert("Could not save the expense (check your internet). Nothing was saved.\n" + db.errMsg(e));
+        return false;
+      }
+    },
+    removeExpense: async (id) => {
+      if (!userId) return false;
+      try {
+        await db.deleteExpense(id);
+        setExpenses((prev) => {
+          const next = prev.filter((x) => x.id !== id);
+          writeCache(userId, { expenses: next });
+          return next;
+        });
         return true;
       } catch (e) {
         alert("Could not delete (check your internet).\n" + db.errMsg(e));
@@ -155,18 +202,18 @@ export default function TripBillingApp() {
       try {
         await db.saveSettings(userId, next);
         setSettings(next);
-        writeCache(userId, next, trips);
+        writeCache(userId, { settings: next });
         return true;
       } catch (e) {
         alert("Could not save settings (check your internet).\n" + db.errMsg(e));
         return false;
       }
     },
-    replaceAll: async (s, t) => {
+    replaceAll: async (s, t, x) => {
       if (!userId) return false;
       setStatus({ text: "Restoring backup… please wait", kind: "info" });
       try {
-        await db.replaceAll(userId, s, t);
+        await db.replaceAll(userId, s, t, x, expensesReady);
         return true;
       } catch (e) {
         alert("Restore failed (check your internet) — please try again.\n" + db.errMsg(e));
@@ -175,12 +222,13 @@ export default function TripBillingApp() {
         await loadAll(userId);
       }
     },
-    wipeTrips: async () => {
+    wipeAll: async () => {
       if (!userId) return false;
       try {
-        await db.deleteAllTrips(userId);
+        await db.deleteAllData(userId, expensesReady);
         setTrips([]);
-        writeCache(userId, settings, []);
+        if (expensesReady) setExpenses([]);
+        writeCache(userId, { trips: [], ...(expensesReady ? { expenses: [] } : {}) });
         return true;
       } catch (e) {
         alert("Could not delete (check your internet).\n" + db.errMsg(e));
@@ -205,6 +253,7 @@ export default function TripBillingApp() {
     try { await getSupabase().auth.signOut(); } catch { /* ignore */ }
     try { localStorage.removeItem(CACHE_KEY); } catch { /* ignore */ }
     setTrips([]);
+    setExpenses([]);
     setSettings(cloneSettings(DEFAULT_SETTINGS));
     setUserId(null);
     setScreen("login");
@@ -222,7 +271,7 @@ export default function TripBillingApp() {
       <header className="flex flex-wrap items-center justify-between gap-2.5 bg-brand px-4 py-3.5 text-white print:hidden">
         <div>
           <h1 className="text-xl font-bold">{settings.businessName || "MSK Transport Service"}</h1>
-          <p className="text-[13px] opacity-85">Trip records — quick entry, automatic fare, PDF bills</p>
+          <p className="text-[13px] opacity-85">Trips, bills, expenses and profit</p>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-[13px]">
           <span className="opacity-90">{email}</span>
@@ -266,6 +315,8 @@ export default function TripBillingApp() {
         )}
         {tab === "entry" && <EntryTab api={api} editingId={editingId} setEditingId={setEditingId} onDelete={askDelete} />}
         {tab === "records" && <RecordsTab api={api} onEdit={startEdit} onDelete={askDelete} />}
+        {tab === "expenses" && <ExpensesTab api={api} />}
+        {tab === "profit" && <ProfitTab api={api} onEditTrip={startEdit} />}
         {tab === "settings" && <SettingsTab api={api} />}
         {tab === "backup" && <BackupTab api={api} />}
       </main>
@@ -336,11 +387,19 @@ function SetupScreen() {
         <Card>
           <h1 className="mb-2 text-[22px] font-bold text-brand">Setup needed</h1>
           <p className="mb-2">The database connection is not configured yet.</p>
-          <p className="text-[13px] text-muted">
-            In Vercel, open your project → <b>Settings → Environment Variables</b> and add{" "}
-            <code>NEXT_PUBLIC_SUPABASE_URL</code> and <code>NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code>. Then go to{" "}
-            <b>Deployments</b> and click <b>Redeploy</b>. (See SETUP-GUIDE.md, Step 4.)
+          <p className="mb-2 text-[13px] text-muted">
+            Add your Supabase <code>NEXT_PUBLIC_SUPABASE_URL</code> and <code>NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code>:
           </p>
+          <ul className="list-disc pl-5 text-[13px] text-muted">
+            <li className="mb-1">
+              <b>On Vercel:</b> Project → <b>Settings → Environment Variables</b>, then <b>Deployments → Redeploy</b>.
+              (SETUP-GUIDE.md, Step 3)
+            </li>
+            <li>
+              <b>On your computer:</b> put them in the <code>.env.local</code> file, save, then stop the server
+              (Ctrl + C) and run <code>npm run dev</code> again.
+            </li>
+          </ul>
         </Card>
       </div>
     </div>

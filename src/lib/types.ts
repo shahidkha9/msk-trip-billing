@@ -18,6 +18,28 @@ export interface Trip {
   extra: number;
   notes: string;
   created: number;
+  /** true = an outside (hired) vehicle did this trip */
+  hired: boolean;
+  /** owner / driver of the outside vehicle */
+  hiredParty: string;
+  /** amount you have to pay the outside vehicle */
+  hiredCost: number;
+  /** have you paid the outside vehicle yet? */
+  hiredPaid: boolean;
+  /** date you paid them (YYYY-MM-DD) */
+  hiredPaidDate: string;
+}
+
+/** One expense (driver salary, repair, etc.). */
+export interface Expense {
+  id: string;
+  date: string; // YYYY-MM-DD
+  category: string;
+  amount: number;
+  paidTo: string; // e.g. driver name, workshop
+  vehicleNo: string; // optional
+  notes: string;
+  created: number;
 }
 
 /** Fares per route, per vehicle type. */
@@ -29,6 +51,7 @@ export interface Settings {
   billTo: string;
   loadCharge: number;
   detentionCharge: number;
+  expenseCategories: string[];
   vehicles: string[];
   routes: RateCard;
   /** location name -> route name ("" = not set) */
